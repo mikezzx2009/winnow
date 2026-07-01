@@ -88,9 +88,80 @@ uv run python scripts/check_minimax.py
 
 ---
 
-## 6. 后续阶段（预告）
+## 6. Phase 1 运行（收信 → 判断 → 转发）
 
-- **Phase 1 步骤 1+**：数据层 → 规则预筛 → MiniMax 适配器 → SMTP 转发器 → 管线编排 →
-  IMAP IDLE 常驻服务 + CLI（`winnow run` / `once` / `logs`）。
-- **Phase 2**：登录、邮箱绑定页、转发规则配置、处理日志页、统计面板（React + FastAPI）。
-- **Phase 3**：人工复核纠错、多账号/多用户、更健壮的告警。
+命令（`winnow` 由 `uv sync` 安装到虚拟环境）：
+
+```bash
+# 演练：回捞最近 5 封真实邮件，走完整判断链路但【不实际转发】——安全的端到端自检
+uv run winnow once --backfill 5 --dry-run
+
+# 跑一轮：处理「上次以来的新邮件」并按判断结果转发
+#   首次运行会把当前最大 UID 设为基线，只处理之后新到的邮件（不回捞旧邮件）
+uv run winnow once
+
+# 常驻服务：IMAP IDLE 长连接实时收信 + 自动重连（Ctrl-C 退出）
+uv run winnow run
+
+# 查看处理记录（AI 判断理由 / 是否转发 / 分类）
+uv run winnow logs --limit 20
+```
+
+单元测试：
+
+```bash
+uv run pytest -q
+```
+
+## 7. 工作原理
+
+- **两级过滤（省额度、避限流）**：先用规则预筛，明显的群发营销（`List-Unsubscribe`
+  退订头、`Precedence: bulk`、营销主题词）直接判为不重要、**不调模型**；拿不准的才交给 MiniMax。
+- **结构化判断**：模型返回 `{is_important, confidence, reason, category}`，对夹带代码围栏/
+  多余文字的输出做健壮 JSON 解析；被限流自动重试 + 指数退避；AI 故障时兜底为「保守转发」。
+- **决策（漏判代价不对称）**：判为重要 → 转发；判为不重要**但置信度低于阈值**（默认 0.75）
+  → 仍然转发。宁可误转发广告，不漏掉重要邮件。阈值可在 `.env` 配。
+- **转发（保留原始身份与内容）**：改写信封头后原样重发原始 MIME —— `From` 为你的 126 地址
+  （SPF/DKIM 天然对齐），`Reply-To` 为原始发件人（回复回到真人），主题加 `[Winnow]` 前缀，
+  原始正文/内联图片/附件完整保留。
+- **幂等（绝不重复转发）**：以 `Message-ID` 去重并记录已处理 UID，服务重启不会重发旧邮件。
+- **反垃圾限速**：相邻转发最小间隔（默认 5s）+ 每日上限（默认 200，超限排队至次日）。
+- **隐私/数据最小化**：邮件正文会发给 MiniMax（第三方）判断；数据库只存元数据 + 判断结果 +
+  ≤120 字短摘要，不长期存完整正文；日志不打印正文与任何凭据。
+
+## 8. 部署到阿里云（Ubuntu 22.04 + systemd）
+
+```bash
+# 1) 安装 uv（若无）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2) 拉代码（首次 clone / 后续 git pull）
+sudo git clone <你的仓库地址> /opt/winnow && cd /opt/winnow
+
+# 3) 装依赖（生成 .venv 及 winnow 命令）
+uv sync
+
+# 4) 配 .env 并收紧权限
+cp .env.example .env && chmod 600 .env && vim .env   # 填 126 授权码 / MiniMax Key
+
+# 5) 【重要】先在服务器上把三个命脉脚本各跑一次，确认真实部署环境也通
+uv run python scripts/check_imap.py
+uv run python scripts/check_smtp.py
+uv run python scripts/check_minimax.py
+
+# 6) 安装并启动 systemd 服务（单元文件见 deploy/winnow.service，按需改 User/路径）
+sudo cp deploy/winnow.service /etc/systemd/system/winnow.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now winnow
+
+# 7) 看日志
+journalctl -u winnow -f
+```
+
+> Phase 1 只有后台服务 + CLI，**无需开放入站端口**；Phase 2 的 Web 端口届时再在阿里云安全组开放。
+
+## 9. 后续阶段（预告）
+
+- **Phase 2**：登录、邮箱绑定页、转发规则配置（白/黑名单、阈值）、处理日志页、统计面板
+  （React + Vite + Tailwind + FastAPI）；届时把授权码 Fernet 加密入库（密钥走环境变量）。
+- **Phase 3**：人工复核纠错、多账号/多用户、更健壮的告警（连接断开/转发失败/授权码失效/AI 限流）。

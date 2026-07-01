@@ -1,0 +1,33 @@
+# Winnow systemd 服务单元 —— 部署到阿里云轻量应用服务器 (Ubuntu 22.04)。
+#
+# 安装：
+#   sudo cp deploy/winnow.service /etc/systemd/system/winnow.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now winnow
+#   journalctl -u winnow -f          # 实时看日志
+#
+# 请按实际情况调整 User / WorkingDirectory / ExecStart 路径。
+
+[Unit]
+Description=Winnow - 126 邮箱 AI 智能转发服务
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 建议用非 root 专用用户运行 (需先 useradd)；如用其它用户请一并修改路径
+User=winnow
+WorkingDirectory=/opt/winnow
+# 直接调用 venv 内的 winnow 可执行文件 (uv sync 会生成)，运行时不依赖 uv
+ExecStart=/opt/winnow/.venv/bin/winnow run
+# 断线/异常自动重启 (应用内也有 IMAP 重连；此处为进程级兜底)
+Restart=always
+RestartSec=10
+# 凭据只经 .env 提供 (应用自身从 WorkingDirectory/.env 加载)
+# 加固：限制文件权限 chmod 600 /opt/winnow/.env
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target
