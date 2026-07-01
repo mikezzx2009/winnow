@@ -10,11 +10,23 @@ dependencies = [
     "pydantic-settings>=2.5.0",
     # HTTP 客户端: MiniMax 原生接口调用 (同时支持 sync/async)
     "httpx>=0.27.0",
+    # 数据层: SQLModel(SQLAlchemy + pydantic v2), 便于以后换 Postgres
+    "sqlmodel>=0.0.21",
 ]
 
 # 后续阶段按需追加的依赖 (占位说明, 到对应步骤再启用):
 #   Phase 1 步骤1+: sqlmodel  (数据层)
 #   Phase 2:        fastapi uvicorn passlib[bcrypt] python-jose cryptography
+
+[project.scripts]
+winnow = "app.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
 
 [dependency-groups]
 dev = [

@@ -17,7 +17,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=PROJECT_ROOT / ".env",
+        # 同时尝试「源码根目录的 .env」和「当前工作目录的 .env」：
+        # 前者适配本地开发/可编辑安装；后者适配 systemd(WorkingDirectory)/非可编辑安装。
+        env_file=(PROJECT_ROOT / ".env", Path(".env")),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
