@@ -1,0 +1,27 @@
+# Winnow Web 控制台 systemd 单元（与收信服务 winnow.service 并行运行）。
+#
+#   sudo cp deploy/winnow-web.service /etc/systemd/system/winnow-web.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now winnow-web
+#   journalctl -u winnow-web -f
+#
+# 端口 8000 需在阿里云安全组放行（建议只对可信 IP，或前面加 Nginx + HTTPS）。
+
+[Unit]
+Description=Winnow Web 控制台（FastAPI + 内置前端）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=winnow
+WorkingDirectory=/opt/winnow
+ExecStart=/opt/winnow/.venv/bin/winnow web --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target

@@ -160,8 +160,48 @@ journalctl -u winnow -f
 
 > Phase 1 只有后台服务 + CLI，**无需开放入站端口**；Phase 2 的 Web 端口届时再在阿里云安全组开放。
 
-## 9. 后续阶段（预告）
+## 9. Web 控制台（Phase 2）
 
-- **Phase 2**：登录、邮箱绑定页、转发规则配置（白/黑名单、阈值）、处理日志页、统计面板
-  （React + Vite + Tailwind + FastAPI）；届时把授权码 Fernet 加密入库（密钥走环境变量）。
-- **Phase 3**：人工复核纠错、多账号/多用户、更健壮的告警（连接断开/转发失败/授权码失效/AI 限流）。
+FastAPI 后端 + React(Vite+Tailwind) 前端，前端构建产物由 FastAPI 单进程托管（单端口）。
+需在 `.env` 配置 `FERNET_KEY`（绑定授权码加密）和 `SESSION_SECRET`（登录 Cookie 签名）。
+
+```bash
+# 1) 设置控制台登录密码（首次必做；不带 --password 则交互式输入）
+uv run winnow set-password --username admin
+
+# 2) 构建前端（改动前端后需重跑；产物 web/dist 已入库，服务器可跳过此步）
+cd web && npm install && npm run build && cd ..
+
+# 3) 启动控制台，浏览器打开 http://<host>:8000
+uv run winnow web --host 0.0.0.0 --port 8000
+```
+
+功能：登录 → **统计面板**（今日/累计 收到·重要·转发）→ **邮箱绑定**（126 地址+授权码，
+Fernet 加密入库；转发目标/前缀/阈值/间隔/每日上限/启用开关）→ **转发规则**（发件人白/黑名单，
+白名单必转发、黑名单必拦截）→ **处理日志**（列表 + AI 理由 + 转发状态 + 搜索/筛选）。
+
+配置改动即时生效：常驻收信服务每轮从 DB 重读账号配置与名单（连接凭据/前缀改动需重启收信服务）。
+授权码优先用控制台绑定的（解密使用），未绑定则回退 `.env`。
+
+## 10. 部署两个服务（阿里云 · systemd）
+
+Winnow 由两个进程组成，各一个 systemd 单元：
+- **收信服务** `winnow.service` → `winnow run`（IMAP IDLE 常驻，无需开端口）
+- **Web 控制台** `winnow-web.service` → `winnow web`（端口 8000，需在安全组放行）
+
+```bash
+sudo cp deploy/winnow.service      /etc/systemd/system/
+sudo cp deploy/winnow-web.service  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now winnow winnow-web
+journalctl -u winnow -f          # 收信日志
+journalctl -u winnow-web -f      # 控制台日志
+```
+
+> `web/dist` 已随仓库提交，服务器 `git pull` 后无需 Node 即可运行控制台。
+> 生产建议：控制台前面加 Nginx 反代 + HTTPS，或安全组只放行可信 IP。
+
+## 11. 后续阶段（预告）
+
+- **Phase 3**：人工复核纠错（在日志页标记「其实重要/其实垃圾」用于改进判断）、多账号/多用户、
+  更健壮的告警（连接断开/转发失败/授权码失效/AI 限流）。

@@ -22,11 +22,13 @@ venv/
 
 # ===== 前端 (Phase 2) =====
 node_modules/
-web/dist/
+# web/dist/ 有意入库：让阿里云服务器无需 Node 即可运行（改前端后需重新 build 并提交）
 
-# ===== 系统 / 编辑器 =====
+# ===== 系统 / 编辑器 / 本地工具 =====
 .DS_Store
 .idea/
 .vscode/
+# 本地工具配置(launch.json 含绝对路径, 不可移植)
+.claude/
 
 # 注意: uv.lock 需要入库, 故不忽略
