@@ -23,10 +23,10 @@ from sqlalchemy import desc
 from sqlmodel import select
 
 from app.config import require, settings
-from app.db import init_db, session_scope
+from app.db import get_or_create_primary_account, init_db, session_scope
 from app.models import ProcessedEmail, User
 from app.security import hash_password
-from app.service import WinnowService, _get_last_seen, _update_last_seen, run
+from app.service import AccountWorker, _get_last_seen, _update_last_seen, run
 
 
 def _setup_logging() -> None:
@@ -51,25 +51,26 @@ def cmd_run(_args: argparse.Namespace) -> int:
 
 def cmd_once(args: argparse.Namespace) -> int:
     _require_core_config()
-    svc = WinnowService(settings)
-    account = svc.account
-    svc.imap.connect()
+    init_db()
+    account = get_or_create_primary_account(settings.email_126)
+    worker = AccountWorker(settings, account)
+    worker.imap.connect()
     try:
         if args.backfill:
-            messages = svc.imap.fetch_last(args.backfill)
+            messages = worker.imap.fetch_last(args.backfill)
             print(f"回捞最近 {len(messages)} 封演练（dry_run={args.dry_run}）：")
-            svc.process_batch(account, messages, dry_run=args.dry_run, advance_uid=False)
+            worker.process_batch(messages, dry_run=args.dry_run, advance_uid=False)
         else:
             if _get_last_seen(account.id) is None:
-                max_uid = svc.imap.get_max_uid()
+                max_uid = worker.imap.get_max_uid()
                 _update_last_seen(account.id, max_uid or 0)
                 print(f"首次运行：已设基线 last_seen_uid={max_uid or 0}，未处理旧邮件。")
                 print("给该 126 邮箱发一封新邮件后再次运行 `winnow once` 即可看到处理。")
                 return 0
-            svc._process_new(account)
+            worker._process_new()
             print("已处理本轮新邮件（详见日志/`winnow logs`）。")
     finally:
-        svc.imap.disconnect()
+        worker.imap.disconnect()
     return 0
 
 

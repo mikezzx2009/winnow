@@ -1,4 +1,7 @@
-"""控制台 REST API（挂载在 /api 下）。除登录外均需已登录。"""
+"""控制台 REST API（挂载在 /api 下）。除登录外均需已登录。
+
+多账号：账号相关端点接受可选 ?account_id=，缺省用主账号（id 最小）。
+"""
 
 from __future__ import annotations
 
@@ -16,7 +19,7 @@ from app.db import get_or_create_primary_account, session_scope
 from app.events import HEARTBEAT_STALE_SECONDS, is_healthy
 from app.models import Account, Event, ProcessedEmail, SenderRule, User
 from app.runtime import runtime_config_for
-from app.security import require_login, verify_password
+from app.security import hash_password, require_login, verify_password
 
 router = APIRouter()
 
@@ -29,6 +32,15 @@ def db_session():
 def _primary_account(session: Session) -> Account:
     acc = get_or_create_primary_account(settings.email_126)
     return session.get(Account, acc.id)
+
+
+def _resolve_account(session: Session, account_id: Optional[int]) -> Account:
+    if account_id is not None:
+        acc = session.get(Account, account_id)
+        if acc is None:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        return acc
+    return _primary_account(session)
 
 
 # ----------------------------- 认证 -----------------------------
@@ -58,7 +70,62 @@ def me(user: str = Depends(require_login)):
     return {"username": user}
 
 
-# ----------------------------- 账号 / 绑定 / 配置 -----------------------------
+# ----------------------------- 账号管理（多账号）-----------------------------
+
+class EmailIn(BaseModel):
+    email: str
+
+
+@router.get("/accounts")
+def list_accounts(_: str = Depends(require_login), session: Session = Depends(db_session)):
+    _primary_account(session)  # 确保至少有一个账号
+    accs = session.exec(select(Account).order_by(Account.id)).all()
+    return [
+        {
+            "id": a.id,
+            "email": a.email,
+            "bound": a.imap_auth_code_encrypted is not None,
+            "enabled": a.enabled,
+        }
+        for a in accs
+    ]
+
+
+@router.post("/accounts")
+def create_account(
+    body: EmailIn, _: str = Depends(require_login), session: Session = Depends(db_session)
+):
+    email = body.email.strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="邮箱不能为空")
+    if session.exec(select(Account).where(Account.email == email)).first():
+        raise HTTPException(status_code=400, detail="该邮箱账号已存在")
+    acc = Account(email=email)
+    session.add(acc)
+    session.flush()
+    return {"id": acc.id, "email": acc.email}
+
+
+@router.delete("/accounts/{account_id}")
+def delete_account(
+    account_id: int, _: str = Depends(require_login), session: Session = Depends(db_session)
+):
+    total = session.exec(select(func.count()).select_from(Account)).one()
+    if total <= 1:
+        raise HTTPException(status_code=400, detail="至少保留一个账号")
+    acc = session.get(Account, account_id)
+    if acc is not None:
+        for r in session.exec(select(SenderRule).where(SenderRule.account_id == account_id)).all():
+            session.delete(r)
+        for e in session.exec(select(Event).where(Event.account_id == account_id)).all():
+            session.delete(e)
+        for p in session.exec(select(ProcessedEmail).where(ProcessedEmail.account_id == account_id)).all():
+            session.delete(p)
+        session.delete(acc)
+    return {"ok": True}
+
+
+# ----------------------------- 账号绑定 / 配置 -----------------------------
 
 class BindingIn(BaseModel):
     email: str
@@ -75,10 +142,15 @@ class ConfigIn(BaseModel):
 
 
 @router.get("/account")
-def get_account(_: str = Depends(require_login), session: Session = Depends(db_session)):
-    acc = _primary_account(session)
+def get_account(
+    account_id: Optional[int] = None,
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
+):
+    acc = _resolve_account(session, account_id)
     rc = runtime_config_for(acc, settings)
     return {
+        "id": acc.id,
         "email": acc.email,
         "bound": acc.imap_auth_code_encrypted is not None,
         "enabled": acc.enabled,
@@ -92,9 +164,12 @@ def get_account(_: str = Depends(require_login), session: Session = Depends(db_s
 
 @router.put("/account/binding")
 def put_binding(
-    body: BindingIn, _: str = Depends(require_login), session: Session = Depends(db_session)
+    body: BindingIn,
+    account_id: Optional[int] = None,
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
 ):
-    acc = _primary_account(session)
+    acc = _resolve_account(session, account_id)
     acc.email = body.email.strip()
     acc.imap_auth_code_encrypted = encrypt(body.auth_code.strip())  # Fernet 加密入库
     session.add(acc)
@@ -103,9 +178,12 @@ def put_binding(
 
 @router.put("/account/config")
 def put_config(
-    body: ConfigIn, _: str = Depends(require_login), session: Session = Depends(db_session)
+    body: ConfigIn,
+    account_id: Optional[int] = None,
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
 ):
-    acc = _primary_account(session)
+    acc = _resolve_account(session, account_id)
     for field_name, value in body.model_dump(exclude_unset=True).items():
         setattr(acc, field_name, value)
     session.add(acc)
@@ -120,22 +198,29 @@ class RuleIn(BaseModel):
 
 
 @router.get("/rules")
-def list_rules(_: str = Depends(require_login), session: Session = Depends(db_session)):
-    acc = _primary_account(session)
+def list_rules(
+    account_id: Optional[int] = None,
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
+):
+    acc = _resolve_account(session, account_id)
     rules = session.exec(select(SenderRule).where(SenderRule.account_id == acc.id)).all()
     return [{"id": r.id, "pattern": r.pattern, "kind": r.kind} for r in rules]
 
 
 @router.post("/rules")
 def add_rule(
-    body: RuleIn, _: str = Depends(require_login), session: Session = Depends(db_session)
+    body: RuleIn,
+    account_id: Optional[int] = None,
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
 ):
     if body.kind not in ("whitelist", "blacklist"):
         raise HTTPException(status_code=400, detail="kind 必须是 whitelist 或 blacklist")
     pattern = body.pattern.strip().lower()
     if not pattern:
         raise HTTPException(status_code=400, detail="pattern 不能为空")
-    acc = _primary_account(session)
+    acc = _resolve_account(session, account_id)
     rule = SenderRule(account_id=acc.id, pattern=pattern, kind=body.kind)
     session.add(rule)
     session.flush()
@@ -156,6 +241,7 @@ def delete_rule(
 
 @router.get("/logs")
 def list_logs(
+    account_id: Optional[int] = None,
     _: str = Depends(require_login),
     session: Session = Depends(db_session),
     limit: int = 50,
@@ -164,7 +250,8 @@ def list_logs(
     important: Optional[bool] = None,
     forwarded: Optional[bool] = None,
 ):
-    conditions = []
+    acc = _resolve_account(session, account_id)
+    conditions = [ProcessedEmail.account_id == acc.id]
     if q:
         like = f"%{q}%"
         conditions.append(
@@ -216,7 +303,6 @@ def review_log(
     log_id: int, body: ReviewIn, _: str = Depends(require_login),
     session: Session = Depends(db_session),
 ):
-    """人工复核纠错：标记「其实重要 / 其实垃圾」，或清除标记。"""
     rec = session.get(ProcessedEmail, log_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="记录不存在")
@@ -235,11 +321,17 @@ def review_log(
 # ----------------------------- 统计面板 -----------------------------
 
 @router.get("/stats")
-def stats(_: str = Depends(require_login), session: Session = Depends(db_session)):
+def stats(
+    account_id: Optional[int] = None,
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
+):
+    acc = _resolve_account(session, account_id)
     day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    scope = ProcessedEmail.account_id == acc.id
 
     def count(*conditions) -> int:
-        stmt = select(func.count()).select_from(ProcessedEmail)
+        stmt = select(func.count()).select_from(ProcessedEmail).where(scope)
         for cond in conditions:
             stmt = stmt.where(cond)
         return session.exec(stmt).one()
@@ -263,12 +355,14 @@ def stats(_: str = Depends(require_login), session: Session = Depends(db_session
 
 @router.get("/events")
 def list_events(
+    account_id: Optional[int] = None,
     _: str = Depends(require_login),
     session: Session = Depends(db_session),
     limit: int = 50,
     unresolved_only: bool = False,
 ):
-    stmt = select(Event)
+    acc = _resolve_account(session, account_id)
+    stmt = select(Event).where(Event.account_id == acc.id)
     if unresolved_only:
         stmt = stmt.where(Event.resolved == False)  # noqa: E712
     rows = session.exec(stmt.order_by(desc(Event.id)).limit(min(limit, 200))).all()
@@ -297,19 +391,22 @@ def resolve_event(
 
 
 @router.get("/status")
-def service_status(_: str = Depends(require_login), session: Session = Depends(db_session)):
-    acc = _primary_account(session)
+def service_status(
+    account_id: Optional[int] = None,
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
+):
+    acc = _resolve_account(session, account_id)
     last_poll = acc.last_poll_at
     seconds = None
     if last_poll is not None:
-        # SQLite 读回的 datetime 可能是 naive（代表 UTC），补上时区再比较
         lp = last_poll if last_poll.tzinfo else last_poll.replace(tzinfo=timezone.utc)
         seconds = (datetime.now(timezone.utc) - lp).total_seconds()
 
     def unresolved(level: str) -> int:
         return session.exec(
             select(func.count()).select_from(Event).where(
-                Event.resolved == False, Event.level == level  # noqa: E712
+                Event.account_id == acc.id, Event.resolved == False, Event.level == level  # noqa: E712
             )
         ).one()
 
@@ -323,3 +420,67 @@ def service_status(_: str = Depends(require_login), session: Session = Depends(d
         "bound": acc.imap_auth_code_encrypted is not None,
         "enabled": acc.enabled,
     }
+
+
+# ----------------------------- 用户管理（多用户）-----------------------------
+
+class UserIn(BaseModel):
+    username: str
+    password: str
+
+
+class PasswordIn(BaseModel):
+    password: str
+
+
+@router.get("/users")
+def list_users(_: str = Depends(require_login), session: Session = Depends(db_session)):
+    users = session.exec(select(User).order_by(User.id)).all()
+    return [{"id": u.id, "username": u.username} for u in users]
+
+
+@router.post("/users")
+def create_user(
+    body: UserIn, _: str = Depends(require_login), session: Session = Depends(db_session)
+):
+    username = body.username.strip()
+    if not username or not body.password:
+        raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+    if session.exec(select(User).where(User.username == username)).first():
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    session.add(User(username=username, password_hash=hash_password(body.password)))
+    return {"ok": True}
+
+
+@router.post("/users/{user_id}/password")
+def set_user_password(
+    user_id: int, body: PasswordIn, _: str = Depends(require_login),
+    session: Session = Depends(db_session),
+):
+    if not body.password:
+        raise HTTPException(status_code=400, detail="密码不能为空")
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    user.password_hash = hash_password(body.password)
+    session.add(user)
+    return {"ok": True}
+
+
+@router.delete("/users/{user_id}")
+def delete_user(
+    user_id: int,
+    request: Request,
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
+):
+    total = session.exec(select(func.count()).select_from(User)).one()
+    if total <= 1:
+        raise HTTPException(status_code=400, detail="至少保留一个用户")
+    user = session.get(User, user_id)
+    if user is None:
+        return {"ok": True}
+    if user.username == request.session.get("user"):
+        raise HTTPException(status_code=400, detail="不能删除当前登录用户")
+    session.delete(user)
+    return {"ok": True}

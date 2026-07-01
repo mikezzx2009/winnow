@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from app.config import Settings
 from app.crypto import decrypt
@@ -53,14 +53,24 @@ def runtime_config_for(account: Account, settings: Settings) -> RuntimeConfig:
     )
 
 
-def effective_credentials(account: Account, settings: Settings) -> tuple[str, str]:
-    """返回 (email, auth_code)：优先用 DB 中绑定的（解密），否则回退 .env。"""
+def effective_credentials(account: Account, settings: Settings) -> tuple[str, Optional[str]]:
+    """返回 (email, auth_code)：优先用 DB 绑定的（解密）；仅当账号邮箱与 .env 一致时才回退 .env。
+
+    多账号下，未绑定授权码的账号返回 auth_code=None（不可用 .env 里另一账号的授权码）。
+    """
     email = account.email or settings.email_126
     if account.imap_auth_code_encrypted:
-        auth_code = decrypt(account.imap_auth_code_encrypted)
-    else:
-        auth_code = settings.imap_auth_code
-    return email, auth_code
+        return email, decrypt(account.imap_auth_code_encrypted)
+    if account.email == settings.email_126 and settings.imap_auth_code:
+        return email, settings.imap_auth_code
+    return email, None
+
+
+def account_has_credentials(account: Account, settings: Settings) -> bool:
+    """该账号是否具备可用于连接的凭据（已绑定，或就是 .env 里的那个账号）。"""
+    if account.imap_auth_code_encrypted:
+        return True
+    return account.email == settings.email_126 and bool(settings.imap_auth_code)
 
 
 def sender_rules_from(rules: List[SenderRule]) -> SenderRules:

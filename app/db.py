@@ -3,15 +3,26 @@
 from contextlib import contextmanager
 from typing import Iterator
 
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
 from app.models import Account  # noqa: F401  (确保建表时模型已注册)
 from app.models import ProcessedEmail  # noqa: F401
 
-# SQLite 需要 check_same_thread=False，以便 IDLE 线程与主线程共享连接。
-_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+# SQLite 需要 check_same_thread=False，以便多账号 worker 线程与 Web 进程共享连接。
+_is_sqlite = settings.database_url.startswith("sqlite")
+_connect_args = {"check_same_thread": False} if _is_sqlite else {}
 engine = create_engine(settings.database_url, echo=False, connect_args=_connect_args)
+
+if _is_sqlite:
+    # WAL 模式 + busy_timeout：降低多线程/多进程并发写时的 "database is locked"。
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.close()
 
 
 def init_db() -> None:
@@ -59,4 +70,7 @@ def get_primary_account():
 
 def get_or_create_primary_account(default_email: str) -> Account:
     account = get_primary_account()
-    return account if account is not None else ensure_account(default_email)
+    if account is not None:
+        return account
+    # EMAIL_126 未配置时用占位地址，避免控制台首屏 500；用户可在绑定页改为真实地址
+    return ensure_account(default_email or "unconfigured@126.com")
