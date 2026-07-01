@@ -1,0 +1,30 @@
+# ===== 密钥 / 凭据 (绝不入库) =====
+.env
+*.pem
+*.key
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== 数据库 =====
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== 前端 (Phase 2) =====
+node_modules/
+web/dist/
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+.idea/
+.vscode/
+
+# 注意: uv.lock 需要入库, 故不忽略

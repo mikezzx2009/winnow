@@ -1,0 +1,26 @@
+[project]
+name = "winnow"
+version = "0.1.0"
+description = "126 邮箱 AI 智能转发服务 —— 带 Web 控制台的后台邮件处理服务"
+requires-python = ">=3.11"
+dependencies = [
+    # 收信: 对网易兼容较好, 支持 IDLE
+    "imap-tools>=1.7.0",
+    # 配置: 从 .env 读取并做类型校验, 缺 Key 时启动即报错
+    "pydantic-settings>=2.5.0",
+    # HTTP 客户端: MiniMax 原生接口调用 (同时支持 sync/async)
+    "httpx>=0.27.0",
+]
+
+# 后续阶段按需追加的依赖 (占位说明, 到对应步骤再启用):
+#   Phase 1 步骤1+: sqlmodel  (数据层)
+#   Phase 2:        fastapi uvicorn passlib[bcrypt] python-jose cryptography
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
