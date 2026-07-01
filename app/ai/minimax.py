@@ -126,6 +126,10 @@ class MiniMaxAnalyzer:
         except Exception as exc:  # noqa: BLE001
             # 兜底：判断失败时倾向转发，绝不因 AI 故障丢掉可能重要的邮件
             logger.warning("MiniMax 分析失败，回退为保守转发：%s", exc)
+            from app.events import record_event  # 延迟导入避免导入环
+
+            kind = "ratelimit" if "限流" in str(exc) or "429" in str(exc) else "other"
+            record_event("warning", kind, f"MiniMax 判断失败，已保守转发：{exc}")
             return Analysis(
                 is_important=True,
                 confidence=0.0,

@@ -45,6 +45,9 @@ class Account(SQLModel, table=True):
     daily_forward_limit: Optional[int] = Field(default=None)
     enabled: bool = Field(default=True)
 
+    # --- Phase 3：收信服务心跳（控制台据此判断服务是否在线）---
+    last_poll_at: Optional[datetime] = Field(default=None)
+
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -55,6 +58,18 @@ class SenderRule(SQLModel, table=True):
     account_id: int = Field(index=True, foreign_key="account.id")
     pattern: str                       # 小写子串，如 "boss@company.com" 或 "@company.com"
     kind: str                          # "whitelist"（必转发）| "blacklist"（必拦截）
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class Event(SQLModel, table=True):
+    """Phase 3：系统事件/告警（连接断开、转发失败、授权码失效、AI 限流等）。"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_id: Optional[int] = Field(default=None, index=True)
+    level: str = Field(default="info")     # info | warning | error
+    kind: str = Field(default="other")     # connection | auth | forward | ratelimit | other
+    message: str = Field(default="")
+    resolved: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -89,5 +104,9 @@ class ProcessedEmail(SQLModel, table=True):
     forwarded: bool = Field(default=False)
     forwarded_at: Optional[datetime] = Field(default=None)
     error: str = Field(default="")
+
+    # --- Phase 3：人工复核纠错（用户在控制台标记「其实重要/其实垃圾」）---
+    review_label: Optional[str] = Field(default=None)   # important | not_important | None
+    reviewed_at: Optional[datetime] = Field(default=None)
 
     created_at: datetime = Field(default_factory=_utcnow)

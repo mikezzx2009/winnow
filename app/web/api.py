@@ -13,7 +13,8 @@ from sqlmodel import Session, desc, select
 from app.config import settings
 from app.crypto import encrypt
 from app.db import get_or_create_primary_account, session_scope
-from app.models import Account, ProcessedEmail, SenderRule, User
+from app.events import HEARTBEAT_STALE_SECONDS, is_healthy
+from app.models import Account, Event, ProcessedEmail, SenderRule, User
 from app.runtime import runtime_config_for
 from app.security import require_login, verify_password
 
@@ -198,11 +199,37 @@ def list_logs(
             "forwarded": r.forwarded,
             "error": r.error,
             "short_summary": r.short_summary,
+            "review_label": r.review_label,
             "received_at": r.received_at.isoformat() if r.received_at else None,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
 
     return {"total": total, "items": [serialize(r) for r in rows]}
+
+
+class ReviewIn(BaseModel):
+    label: str  # important | not_important | clear
+
+
+@router.post("/logs/{log_id}/review")
+def review_log(
+    log_id: int, body: ReviewIn, _: str = Depends(require_login),
+    session: Session = Depends(db_session),
+):
+    """人工复核纠错：标记「其实重要 / 其实垃圾」，或清除标记。"""
+    rec = session.get(ProcessedEmail, log_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    if body.label == "clear":
+        rec.review_label = None
+        rec.reviewed_at = None
+    elif body.label in ("important", "not_important"):
+        rec.review_label = body.label
+        rec.reviewed_at = datetime.now(timezone.utc)
+    else:
+        raise HTTPException(status_code=400, detail="label 必须是 important/not_important/clear")
+    session.add(rec)
+    return {"ok": True, "review_label": rec.review_label}
 
 
 # ----------------------------- 统计面板 -----------------------------
@@ -229,4 +256,70 @@ def stats(_: str = Depends(require_login), session: Session = Depends(db_session
             "important": count(ProcessedEmail.is_important == True),  # noqa: E712
             "forwarded": count(ProcessedEmail.forwarded == True),  # noqa: E712
         },
+    }
+
+
+# ----------------------------- 系统状态 / 告警 -----------------------------
+
+@router.get("/events")
+def list_events(
+    _: str = Depends(require_login),
+    session: Session = Depends(db_session),
+    limit: int = 50,
+    unresolved_only: bool = False,
+):
+    stmt = select(Event)
+    if unresolved_only:
+        stmt = stmt.where(Event.resolved == False)  # noqa: E712
+    rows = session.exec(stmt.order_by(desc(Event.id)).limit(min(limit, 200))).all()
+    return [
+        {
+            "id": e.id,
+            "level": e.level,
+            "kind": e.kind,
+            "message": e.message,
+            "resolved": e.resolved,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in rows
+    ]
+
+
+@router.post("/events/{event_id}/resolve")
+def resolve_event(
+    event_id: int, _: str = Depends(require_login), session: Session = Depends(db_session)
+):
+    e = session.get(Event, event_id)
+    if e is not None:
+        e.resolved = True
+        session.add(e)
+    return {"ok": True}
+
+
+@router.get("/status")
+def service_status(_: str = Depends(require_login), session: Session = Depends(db_session)):
+    acc = _primary_account(session)
+    last_poll = acc.last_poll_at
+    seconds = None
+    if last_poll is not None:
+        # SQLite 读回的 datetime 可能是 naive（代表 UTC），补上时区再比较
+        lp = last_poll if last_poll.tzinfo else last_poll.replace(tzinfo=timezone.utc)
+        seconds = (datetime.now(timezone.utc) - lp).total_seconds()
+
+    def unresolved(level: str) -> int:
+        return session.exec(
+            select(func.count()).select_from(Event).where(
+                Event.resolved == False, Event.level == level  # noqa: E712
+            )
+        ).one()
+
+    err = unresolved("error")
+    return {
+        "last_poll_at": last_poll.isoformat() if last_poll else None,
+        "seconds_since_poll": int(seconds) if seconds is not None else None,
+        "healthy": is_healthy(seconds, err),
+        "stale_threshold": HEARTBEAT_STALE_SECONDS,
+        "unresolved": {"error": err, "warning": unresolved("warning")},
+        "bound": acc.imap_auth_code_encrypted is not None,
+        "enabled": acc.enabled,
     }

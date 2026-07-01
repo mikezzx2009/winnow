@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 
 from app.ai.base import Analysis, Analyzer
 from app.ai.prefilter import run_prefilter
+from app.events import record_event
 from app.mail.smtp_forwarder import SmtpForwarder
 from app.models import Account, ProcessedEmail
 from app.runtime import RuntimeConfig, SenderRules
@@ -153,6 +154,10 @@ def process_message(
             except Exception as exc:  # noqa: BLE001
                 record.error = f"转发失败：{type(exc).__name__}: {exc}"[:500]
                 logger.error("转发失败 UID=%s：%s", msg.uid, exc)
+                record_event(
+                    "error", "forward",
+                    f"转发失败 UID={msg.uid} 主题={subject[:40]}: {exc}", account_id,
+                )
     elif want_forward and dry_run:
         record.error = "dry-run：本应转发但未实际发送"
 

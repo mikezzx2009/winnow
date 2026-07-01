@@ -13,9 +13,12 @@ from typing import Optional
 
 from sqlmodel import select
 
+from datetime import datetime, timezone
+
 from app.ai.minimax import MiniMaxAnalyzer
 from app.config import Settings, settings
 from app.db import get_or_create_primary_account, init_db, session_scope
+from app.events import classify_connection_error, record_event
 from app.mail.imap_client import ImapClient
 from app.mail.smtp_forwarder import SmtpForwarder
 from app.models import Account, SenderRule
@@ -60,6 +63,14 @@ def _get_last_seen(account_id: int) -> Optional[int]:
         return acc.last_seen_uid if acc else None
 
 
+def _touch_poll(account_id: int) -> None:
+    """更新收信服务心跳，供控制台判断在线状态。"""
+    with session_scope() as s:
+        acc = s.get(Account, account_id)
+        if acc is not None:
+            acc.last_poll_at = datetime.now(timezone.utc)
+
+
 class WinnowService:
     def __init__(self, cfg: Settings) -> None:
         self.cfg = cfg
@@ -102,10 +113,15 @@ class WinnowService:
     def run(self) -> None:
         logger.info("Winnow 服务启动，监控 %s", self.account.email)
         reconnect_delay = _RECONNECT_BASE_DELAY
+        had_error = False
         while True:
             try:
                 self.imap.connect()
                 reconnect_delay = _RECONNECT_BASE_DELAY
+                _touch_poll(self.account.id)
+                if had_error:
+                    record_event("info", "connection", "IMAP 重连成功", self.account.id)
+                    had_error = False
 
                 if _get_last_seen(self.account.id) is None:
                     max_uid = self.imap.get_max_uid()
@@ -116,6 +132,7 @@ class WinnowService:
 
                 while True:
                     has_new = self.imap.idle_wait(timeout=_IDLE_TIMEOUT)
+                    _touch_poll(self.account.id)  # 心跳
                     if has_new:
                         logger.info("IDLE 检测到新活动，拉取处理…")
                         self._process_new(self.account)
@@ -124,6 +141,10 @@ class WinnowService:
                 self.imap.disconnect()
                 return
             except Exception as exc:  # noqa: BLE001
+                had_error = True
+                kind = classify_connection_error(str(exc))
+                hint = "（授权码可能失效，请到控制台重新绑定）" if kind == "auth" else ""
+                record_event("error", kind, f"收信连接/处理异常：{exc}{hint}", self.account.id)
                 logger.error("连接/处理异常：%s；%ds 后重连", exc, reconnect_delay)
                 self.imap.disconnect()
                 time.sleep(reconnect_delay)
