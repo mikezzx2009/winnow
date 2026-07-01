@@ -17,6 +17,15 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class User(SQLModel, table=True):
+    """控制台登录用户（Phase 2 单用户）。密码用 bcrypt 哈希存储。"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(index=True, unique=True)
+    password_hash: str
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class Account(SQLModel, table=True):
     """一个被监控的邮箱账号。Phase 1 只有一行。"""
 
@@ -24,6 +33,28 @@ class Account(SQLModel, table=True):
     email: str = Field(index=True, unique=True)
     # INBOX 已处理到的最大 UID —— 重启后只拉取更大的 UID，避免重复处理旧邮件
     last_seen_uid: Optional[int] = Field(default=None)
+
+    # --- Phase 2：绑定凭据（Fernet 加密后入库，绝不明文）---
+    imap_auth_code_encrypted: Optional[str] = Field(default=None)
+
+    # --- Phase 2：可在控制台配置的转发规则（为空则回退到 .env 默认）---
+    forward_to: Optional[str] = Field(default=None)
+    subject_prefix: Optional[str] = Field(default=None)
+    importance_threshold: Optional[float] = Field(default=None)
+    forward_interval_seconds: Optional[int] = Field(default=None)
+    daily_forward_limit: Optional[int] = Field(default=None)
+    enabled: bool = Field(default=True)
+
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class SenderRule(SQLModel, table=True):
+    """发件人白/黑名单规则。pattern 为发件人地址的小写子串匹配。"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_id: int = Field(index=True, foreign_key="account.id")
+    pattern: str                       # 小写子串，如 "boss@company.com" 或 "@company.com"
+    kind: str                          # "whitelist"（必转发）| "blacklist"（必拦截）
     created_at: datetime = Field(default_factory=_utcnow)
 
 

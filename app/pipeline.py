@@ -16,9 +16,9 @@ from sqlmodel import Session, select
 
 from app.ai.base import Analysis, Analyzer
 from app.ai.prefilter import run_prefilter
-from app.config import Settings
 from app.mail.smtp_forwarder import SmtpForwarder
 from app.models import Account, ProcessedEmail
+from app.runtime import RuntimeConfig, SenderRules
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,8 @@ def process_message(
     *,
     analyzer: Analyzer,
     forwarder: SmtpForwarder,
-    settings: Settings,
+    config: RuntimeConfig,
+    sender_rules: SenderRules | None = None,
     dry_run: bool = False,
 ) -> ProcessedEmail:
     """处理单封邮件并落库；幂等（已处理过的直接跳过，绝不重复转发）。"""
@@ -106,16 +107,31 @@ def process_message(
         received_at=received_at,
     )
 
-    # --- 第一级：规则预筛 ---
-    analysis: Optional[Analysis] = run_prefilter(msg.obj, subject)
+    rules = sender_rules or SenderRules()
 
-    # --- 第二级：模型判断（仅在预筛拿不准时）---
-    if analysis is None:
-        body = extract_body(msg)
-        analysis = analyzer.analyze(subject=subject, from_addr=from_addr, body=body)
-        record.short_summary = body[:_SUMMARY_MAX]
-    else:
+    # --- 第零级：发件人白/黑名单（优先级最高，直接定性、不调模型）---
+    if rules.match_blacklist(from_addr):
+        analysis: Optional[Analysis] = Analysis(
+            is_important=False, confidence=1.0, reason="发件人在黑名单", category="黑名单",
+            prefiltered=True,
+        )
         record.short_summary = analysis.reason[:_SUMMARY_MAX]
+    elif rules.match_whitelist(from_addr):
+        analysis = Analysis(
+            is_important=True, confidence=1.0, reason="发件人在白名单", category="白名单",
+            prefiltered=True,
+        )
+        record.short_summary = analysis.reason[:_SUMMARY_MAX]
+    else:
+        # --- 第一级：规则预筛 ---
+        analysis = run_prefilter(msg.obj, subject)
+        # --- 第二级：模型判断（仅在预筛拿不准时）---
+        if analysis is None:
+            body = extract_body(msg)
+            analysis = analyzer.analyze(subject=subject, from_addr=from_addr, body=body)
+            record.short_summary = body[:_SUMMARY_MAX]
+        else:
+            record.short_summary = analysis.reason[:_SUMMARY_MAX]
 
     record.prefiltered = analysis.prefiltered
     record.is_important = analysis.is_important
@@ -124,14 +140,14 @@ def process_message(
     record.category = analysis.category
 
     # --- 决策 + 转发 ---
-    want_forward = should_forward(analysis, settings.importance_threshold)
+    want_forward = should_forward(analysis, config.importance_threshold)
     if want_forward and not dry_run:
-        if _daily_forward_count(session, account_id) >= settings.daily_forward_limit:
+        if _daily_forward_count(session, account_id) >= config.daily_forward_limit:
             record.error = "已达每日转发上限，排队至次日"
             logger.warning("每日转发上限已满，邮件 UID=%s 排队", msg.uid)
         else:
             try:
-                forwarder.forward(msg.obj, settings.forward_to)
+                forwarder.forward(msg.obj, config.forward_to)
                 record.forwarded = True
                 record.forwarded_at = datetime.now(timezone.utc)
             except Exception as exc:  # noqa: BLE001

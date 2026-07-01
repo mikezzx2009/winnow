@@ -46,3 +46,17 @@ def ensure_account(email: str) -> Account:
         # 分离出来给调用方使用（会话关闭后仍可读属性）
         session.expunge(account)
         return account
+
+
+def get_primary_account():
+    """返回主账号（Phase 1/2 单账号 = id 最小的一行），无则返回 None。"""
+    with session_scope() as session:
+        account = session.exec(select(Account).order_by(Account.id)).first()
+        if account is not None:
+            session.expunge(account)
+        return account
+
+
+def get_or_create_primary_account(default_email: str) -> Account:
+    account = get_primary_account()
+    return account if account is not None else ensure_account(default_email)

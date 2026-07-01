@@ -1,26 +1,31 @@
-"""Winnow 命令行入口（Phase 1 的最简界面）。
+"""Winnow 命令行入口。
 
-    winnow run                         启动常驻服务（IMAP IDLE 实时收信）
+    winnow run                          启动收信常驻服务（IMAP IDLE）
     winnow once [--backfill N] [--dry-run]
-                                       跑一轮：处理新邮件；--backfill 回捞最近 N 封演练；
-                                       --dry-run 只判断不实际转发
-    winnow logs [--limit N]            打印最近的处理记录
+                                        跑一轮：处理新邮件；--backfill 回捞最近 N 封演练；
+                                        --dry-run 只判断不实际转发
+    winnow logs [--limit N]             打印最近的处理记录
+    winnow set-password [--username admin] [--password ...]
+                                        设置控制台登录密码（不带 --password 则交互式输入）
+    winnow web [--host 0.0.0.0] [--port 8000]
+                                        启动 Web 控制台（FastAPI + 内置前端）
 
-用法：uv run winnow <cmd>  或  uv run python -m app.cli <cmd>
+用法：uv run winnow <cmd>
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 
 from sqlalchemy import desc
 from sqlmodel import select
 
 from app.config import require, settings
-from app.db import ensure_account, init_db, session_scope
-from app.models import ProcessedEmail
-from app.pipeline import process_message
+from app.db import init_db, session_scope
+from app.models import ProcessedEmail, User
+from app.security import hash_password
 from app.service import WinnowService, _get_last_seen, _update_last_seen, run
 
 
@@ -46,21 +51,14 @@ def cmd_run(_args: argparse.Namespace) -> int:
 
 def cmd_once(args: argparse.Namespace) -> int:
     _require_core_config()
-    init_db()
-    account = ensure_account(settings.email_126)
     svc = WinnowService(settings)
+    account = svc.account
     svc.imap.connect()
     try:
         if args.backfill:
             messages = svc.imap.fetch_last(args.backfill)
             print(f"回捞最近 {len(messages)} 封演练（dry_run={args.dry_run}）：")
-            for msg in messages:
-                with session_scope() as s:
-                    process_message(
-                        s, account, msg,
-                        analyzer=svc.analyzer, forwarder=svc.forwarder,
-                        settings=settings, dry_run=args.dry_run,
-                    )
+            svc.process_batch(account, messages, dry_run=args.dry_run, advance_uid=False)
         else:
             if _get_last_seen(account.id) is None:
                 max_uid = svc.imap.get_max_uid()
@@ -87,11 +85,11 @@ def cmd_logs(args: argparse.Namespace) -> int:
     print(f"最近 {len(rows)} 条处理记录：")
     print("-" * 100)
     for r in rows:
-        flags = []
-        flags.append("预筛" if r.prefiltered else "AI")
-        flags.append("重要" if r.is_important else "非重要")
-        flags.append("已转发" if r.forwarded else "未转发")
-        status = " ".join(flags)
+        status = " ".join([
+            "预筛" if r.prefiltered else "AI",
+            "重要" if r.is_important else "非重要",
+            "已转发" if r.forwarded else "未转发",
+        ])
         print(f"#{r.id} [{status}] conf={r.confidence:.2f} 类别={r.category}")
         print(f"   来自: {r.from_addr}")
         print(f"   主题: {r.subject}")
@@ -102,11 +100,42 @@ def cmd_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_set_password(args: argparse.Namespace) -> int:
+    init_db()
+    username = args.username
+    if args.password:
+        password = args.password
+    else:
+        password = getpass.getpass(f"为用户 {username} 设置控制台密码: ")
+        if password != getpass.getpass("再输一次确认: "):
+            print("两次输入不一致，未修改。")
+            return 1
+    if not password:
+        print("密码不能为空。")
+        return 1
+    with session_scope() as s:
+        user = s.exec(select(User).where(User.username == username)).first()
+        if user is None:
+            s.add(User(username=username, password_hash=hash_password(password)))
+        else:
+            user.password_hash = hash_password(password)
+    print(f"✅ 已设置用户 {username} 的登录密码。")
+    return 0
+
+
+def cmd_web(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    init_db()
+    uvicorn.run("app.web.main:app", host=args.host, port=args.port, reload=False)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="winnow", description="126 邮箱 AI 智能转发服务")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_run = sub.add_parser("run", help="启动常驻服务（IMAP IDLE）")
+    p_run = sub.add_parser("run", help="启动收信常驻服务（IMAP IDLE）")
     p_run.set_defaults(func=cmd_run)
 
     p_once = sub.add_parser("once", help="跑一轮（处理新邮件 / 回捞演练）")
@@ -117,13 +146,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_logs = sub.add_parser("logs", help="打印最近处理记录")
     p_logs.add_argument("--limit", type=int, default=20, help="显示条数")
     p_logs.set_defaults(func=cmd_logs)
+
+    p_pw = sub.add_parser("set-password", help="设置控制台登录密码")
+    p_pw.add_argument("--username", default="admin")
+    p_pw.add_argument("--password", default=None, help="非交互式传入（省略则交互输入）")
+    p_pw.set_defaults(func=cmd_set_password)
+
+    p_web = sub.add_parser("web", help="启动 Web 控制台")
+    p_web.add_argument("--host", default="0.0.0.0")
+    p_web.add_argument("--port", type=int, default=8000)
+    p_web.set_defaults(func=cmd_web)
     return parser
 
 
 def main() -> int:
     _setup_logging()
-    parser = build_parser()
-    args = parser.parse_args()
+    args = build_parser().parse_args()
     return args.func(args)
 
 

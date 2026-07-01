@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     # ----- 存储 / 加密 (Phase 2 使用) -----
     database_url: str = "sqlite:///winnow.db"
     fernet_key: Optional[str] = None
+    # Web 控制台 session Cookie 签名密钥（需稳定，否则重启后登录失效）
+    session_secret: Optional[str] = None
 
 
 settings = Settings()
