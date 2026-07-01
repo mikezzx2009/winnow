@@ -1,27 +1,30 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { useAccount } from '../accountContext'
 
 const input = 'px-3 py-2 border border-slate-300 rounded-md'
 
 export default function Rules() {
+  const { accountId } = useAccount()
   const [rules, setRules] = useState([])
   const [pattern, setPattern] = useState('')
   const [kind, setKind] = useState('whitelist')
   const [err, setErr] = useState('')
 
   async function load() {
-    setRules(await api.rules())
+    setRules(await api.rules(accountId))
   }
   useEffect(() => {
     load().catch((e) => setErr(e.message))
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId])
 
   async function add(e) {
     e.preventDefault()
     setErr('')
     if (!pattern.trim()) return
     try {
-      await api.addRule(pattern.trim(), kind)
+      await api.addRule(accountId, pattern.trim(), kind)
       setPattern('')
       await load()
     } catch (e) {

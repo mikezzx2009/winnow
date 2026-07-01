@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { useAccount } from '../accountContext'
 
 const input = 'w-full px-3 py-2 border border-slate-300 rounded-md'
 
 export default function Binding() {
+  const { accountId, reloadAccounts } = useAccount()
   const [acc, setAcc] = useState(null)
   const [email, setEmail] = useState('')
   const [authCode, setAuthCode] = useState('')
@@ -12,7 +14,7 @@ export default function Binding() {
   const [err, setErr] = useState('')
 
   async function load() {
-    const a = await api.account()
+    const a = await api.account(accountId)
     setAcc(a)
     setEmail(a.email || '')
     setCfg({
@@ -27,17 +29,19 @@ export default function Binding() {
 
   useEffect(() => {
     load().catch((e) => setErr(e.message))
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId])
 
   async function saveBinding(e) {
     e.preventDefault()
     setErr('')
     setMsg('')
     try {
-      await api.saveBinding(email, authCode)
+      await api.saveBinding(accountId, email, authCode)
       setAuthCode('')
       setMsg('已保存，授权码已加密入库。')
       await load()
+      await reloadAccounts()
     } catch (e) {
       setErr(e.message)
     }
@@ -48,7 +52,7 @@ export default function Binding() {
     setErr('')
     setMsg('')
     try {
-      await api.saveConfig({
+      await api.saveConfig(accountId, {
         forward_to: cfg.forward_to,
         subject_prefix: cfg.subject_prefix,
         importance_threshold: Number(cfg.importance_threshold),
@@ -57,6 +61,7 @@ export default function Binding() {
         enabled: !!cfg.enabled,
       })
       setMsg('配置已保存，常驻服务下一轮生效。')
+      await reloadAccounts()
     } catch (e) {
       setErr(e.message)
     }

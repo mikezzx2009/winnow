@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { useAccount } from '../accountContext'
 
 function fmtAgo(seconds) {
   if (seconds == null) return '从未'
@@ -9,21 +10,23 @@ function fmtAgo(seconds) {
 }
 
 export default function Status() {
+  const { accountId } = useAccount()
   const [st, setSt] = useState(null)
   const [events, setEvents] = useState([])
   const [err, setErr] = useState('')
 
   async function load() {
     try {
-      setSt(await api.status())
-      setEvents(await api.events({ limit: 50 }))
+      setSt(await api.status(accountId))
+      setEvents(await api.events({ limit: 50, account_id: accountId }))
     } catch (e) {
       setErr(e.message)
     }
   }
   useEffect(() => {
     load()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId])
 
   async function resolve(id) {
     await api.resolveEvent(id)

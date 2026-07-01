@@ -25,19 +25,42 @@ async function req(method, path, body) {
 }
 
 export const api = {
+  // 认证
   me: () => req('GET', '/auth/me'),
   login: (username, password) => req('POST', '/auth/login', { username, password }),
   logout: () => req('POST', '/auth/logout'),
-  account: () => req('GET', '/account'),
-  saveBinding: (email, auth_code) => req('PUT', '/account/binding', { email, auth_code }),
-  saveConfig: (cfg) => req('PUT', '/account/config', cfg),
-  rules: () => req('GET', '/rules'),
-  addRule: (pattern, kind) => req('POST', '/rules', { pattern, kind }),
+
+  // 账号（多账号）
+  accounts: () => req('GET', '/accounts'),
+  createAccount: (email) => req('POST', '/accounts', { email }),
+  deleteAccount: (id) => req('DELETE', `/accounts/${id}`),
+
+  // 单账号的绑定 / 配置（account_id 缺省用主账号）
+  account: (accountId) => req('GET', '/account' + toQuery({ account_id: accountId })),
+  saveBinding: (accountId, email, auth_code) =>
+    req('PUT', '/account/binding' + toQuery({ account_id: accountId }), { email, auth_code }),
+  saveConfig: (accountId, cfg) =>
+    req('PUT', '/account/config' + toQuery({ account_id: accountId }), cfg),
+
+  // 规则
+  rules: (accountId) => req('GET', '/rules' + toQuery({ account_id: accountId })),
+  addRule: (accountId, pattern, kind) =>
+    req('POST', '/rules' + toQuery({ account_id: accountId }), { pattern, kind }),
   delRule: (id) => req('DELETE', `/rules/${id}`),
+
+  // 日志 / 复核
   logs: (params) => req('GET', '/logs' + toQuery(params)),
   reviewLog: (id, label) => req('POST', `/logs/${id}/review`, { label }),
-  stats: () => req('GET', '/stats'),
-  status: () => req('GET', '/status'),
+
+  // 统计 / 状态 / 事件
+  stats: (accountId) => req('GET', '/stats' + toQuery({ account_id: accountId })),
+  status: (accountId) => req('GET', '/status' + toQuery({ account_id: accountId })),
   events: (params) => req('GET', '/events' + toQuery(params)),
   resolveEvent: (id) => req('POST', `/events/${id}/resolve`),
+
+  // 用户（多用户）
+  users: () => req('GET', '/users'),
+  createUser: (username, password) => req('POST', '/users', { username, password }),
+  setUserPassword: (id, password) => req('POST', `/users/${id}/password`, { password }),
+  deleteUser: (id) => req('DELETE', `/users/${id}`),
 }

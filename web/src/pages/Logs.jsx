@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { useAccount } from '../accountContext'
 
 function extractEmail(from) {
   const m = /<([^>]+)>/.exec(from || '')
@@ -7,6 +8,7 @@ function extractEmail(from) {
 }
 
 export default function Logs() {
+  const { accountId } = useAccount()
   const [data, setData] = useState({ items: [], total: 0 })
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState({})
@@ -14,7 +16,7 @@ export default function Logs() {
   const [note, setNote] = useState('')
 
   async function load() {
-    const params = { limit: 100, q }
+    const params = { limit: 100, q, account_id: accountId }
     if (filter.important !== undefined) params.important = filter.important
     if (filter.forwarded !== undefined) params.forwarded = filter.forwarded
     try {
@@ -27,7 +29,7 @@ export default function Logs() {
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter])
+  }, [filter, accountId])
 
   async function review(id, label) {
     await api.reviewLog(id, label)
@@ -36,7 +38,7 @@ export default function Logs() {
   async function addRule(from, kind) {
     const pattern = extractEmail(from)
     if (!pattern) return
-    await api.addRule(pattern, kind)
+    await api.addRule(accountId, pattern, kind)
     setNote(`已把 ${pattern} 加入${kind === 'whitelist' ? '白' : '黑'}名单`)
   }
 
