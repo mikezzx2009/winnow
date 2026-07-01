@@ -35,5 +35,9 @@ export const api = {
   addRule: (pattern, kind) => req('POST', '/rules', { pattern, kind }),
   delRule: (id) => req('DELETE', `/rules/${id}`),
   logs: (params) => req('GET', '/logs' + toQuery(params)),
+  reviewLog: (id, label) => req('POST', `/logs/${id}/review`, { label }),
   stats: () => req('GET', '/stats'),
+  status: () => req('GET', '/status'),
+  events: (params) => req('GET', '/events' + toQuery(params)),
+  resolveEvent: (id) => req('POST', `/events/${id}/resolve`),
 }

@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import Binding from './pages/Binding.jsx'
 import Rules from './pages/Rules.jsx'
 import Logs from './pages/Logs.jsx'
+import Status from './pages/Status.jsx'
 
 export default function App() {
   // null=检查中, false=未登录, {username}=已登录
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/binding" element={<Binding />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/logs" element={<Logs />} />
+        <Route path="/status" element={<Status />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

@@ -6,6 +6,7 @@ const tabs = [
   { to: '/binding', label: '邮箱绑定' },
   { to: '/rules', label: '转发规则' },
   { to: '/logs', label: '处理日志' },
+  { to: '/status', label: '系统状态' },
 ]
 
 export default function Layout({ user, onLogout, children }) {

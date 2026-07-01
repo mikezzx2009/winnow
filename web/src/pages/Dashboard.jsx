@@ -12,9 +12,11 @@ function Card({ label, value }) {
 
 export default function Dashboard() {
   const [s, setS] = useState(null)
+  const [st, setSt] = useState(null)
   const [err, setErr] = useState('')
   useEffect(() => {
     api.stats().then(setS).catch((e) => setErr(e.message))
+    api.status().then(setSt).catch(() => {})
   }, [])
 
   if (err) return <div className="text-red-600">{err}</div>
@@ -22,6 +24,18 @@ export default function Dashboard() {
 
   return (
     <div>
+      {st && (
+        <div
+          className={`mb-6 rounded-lg border px-4 py-2 text-sm flex items-center gap-2 ${
+            st.healthy ? 'bg-green-50 border-green-200 text-green-800' : 'bg-amber-50 border-amber-200 text-amber-800'
+          }`}
+        >
+          <span className={`w-2 h-2 rounded-full ${st.healthy ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+          {st.healthy
+            ? '收信服务运行正常'
+            : `收信服务可能离线或有告警（未处理错误 ${st.unresolved.error}）— 详见「系统状态」`}
+        </div>
+      )}
       <h1 className="text-lg font-semibold mb-4">今日</h1>
       <div className="grid grid-cols-3 gap-4 mb-8">
         <Card label="今日收到" value={s.today.received} />
