@@ -225,6 +225,9 @@ sudo -u winnow sqlite3 /opt/winnow/winnow.db ".backup '/opt/winnow/backup-$(date
 - **授权码失效**：控制台「系统状态」会出 `auth` 告警；到「邮箱绑定」重填授权码即可（无需改 .env）。
 - **MiniMax 频繁限流**：把 `.env` 的 `MINIMAX_API_KEY` 换成按量付费 Key（代码无需改），或调大预筛/阈值减少调用。
 - **发信被 126 限频/冻结**：调大 `FORWARD_INTERVAL_SECONDS`、调小 `DAILY_FORWARD_LIMIT`。
+- **实时性/延迟**：网易 126/163 **不支持 IMAP IDLE**，收信服务会自动回退为**轮询**（默认每 30s，
+  `POLL_INTERVAL_SECONDS` 可调），因此从收到到转发有最多约 30s 延迟，属正常现象（日志会有一条
+  “服务器不支持 IMAP IDLE，改用轮询”的 info）。
 - **服务反复重启**：`journalctl -u winnow -e` 看报错；多半是 `.env` 缺 `EMAIL_126/IMAP_AUTH_CODE/MINIMAX_API_KEY`。
 - **重启后要重新登录**：`SESSION_SECRET` 没固定（每次随机）。在 `.env` 固定它。
 - （macOS 本机开发才会遇到的 `getcwd/Operation not permitted`：给终端授予「Documents/完全磁盘访问」或把项目移出 `~/Documents`；Linux 服务器不受影响。）
