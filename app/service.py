@@ -21,7 +21,7 @@ from app.ai.minimax import MiniMaxAnalyzer
 from app.config import Settings, settings
 from app.db import get_or_create_primary_account, init_db, session_scope
 from app.events import classify_connection_error, record_event
-from app.mail.imap_client import ImapClient
+from app.mail.imap_client import IdleNotSupported, ImapClient
 from app.mail.smtp_forwarder import SmtpForwarder
 from app.models import Account, SenderRule
 from app.pipeline import process_message
@@ -131,7 +131,24 @@ class AccountWorker:
 
                 self._process_new()
                 while not stop_event.is_set():
-                    has_new = self.imap.idle_wait(timeout=_IDLE_TIMEOUT)
+                    # 网易 126/163 不支持 IDLE：学到后走轮询（可被 stop 打断的 sleep）
+                    if self.imap.idle_supported is False:
+                        stop_event.wait(self.cfg.poll_interval_seconds)
+                        if stop_event.is_set():
+                            break
+                        _touch_poll(self.account.id)
+                        self._process_new()
+                        continue
+                    try:
+                        has_new = self.imap.idle_wait(timeout=_IDLE_TIMEOUT)
+                    except IdleNotSupported:
+                        record_event(
+                            "info", "connection",
+                            f"服务器不支持 IMAP IDLE，改用轮询（每 {self.cfg.poll_interval_seconds}s）",
+                            self.account.id,
+                        )
+                        logger.info("worker[%s] 不支持 IDLE，改用轮询", self.account.id)
+                        continue  # 下一轮进入轮询分支
                     _touch_poll(self.account.id)
                     if has_new:
                         self._process_new()

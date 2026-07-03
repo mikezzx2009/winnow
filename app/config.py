@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     importance_threshold: float = 0.75
     forward_interval_seconds: int = 5
     daily_forward_limit: int = 200
+    # 服务器不支持 IMAP IDLE 时(如网易 126/163)的轮询间隔秒数
+    poll_interval_seconds: int = 30
 
     # ----- 存储 / 加密 (Phase 2 使用) -----
     database_url: str = "sqlite:///winnow.db"

@@ -18,6 +18,10 @@ from imap_tools.message import MailMessage
 logger = logging.getLogger(__name__)
 
 
+class IdleNotSupported(Exception):
+    """服务器不支持 IMAP IDLE（网易 126/163 就是如此），需回退轮询。"""
+
+
 def _send_imap_id(client: imaplib.IMAP4, contact: str) -> None:
     """发送 IMAP ID 命令声明客户端身份（RFC 2971），规避网易 "Unsafe Login"。"""
     imaplib.Commands["ID"] = ("AUTH", "SELECTED", "NONAUTH")
@@ -45,6 +49,8 @@ class ImapClient:
         self.auth_code = auth_code
         self.folder = folder
         self.mailbox: Optional[MailBox] = None
+        # None=未知, True=支持 IDLE, False=不支持(回退轮询)；跨重连保留，学到一次即可
+        self.idle_supported: Optional[bool] = None
 
     def connect(self) -> None:
         """建立连接：登录 → 发 ID → 选择文件夹。"""
@@ -96,8 +102,19 @@ class ImapClient:
         return messages
 
     def idle_wait(self, timeout: int = 60) -> bool:
-        """IMAP IDLE 等待新邮件事件。返回 True 表示期间有新活动。"""
+        """IMAP IDLE 等待新邮件事件。返回 True 表示期间有新活动。
+
+        若服务器不支持 IDLE（网易 126/163），抛 IdleNotSupported，调用方应回退轮询。
+        """
         assert self.mailbox is not None
-        with self.mailbox.idle as idle:
-            responses = idle.poll(timeout=timeout)
-        return bool(responses)
+        try:
+            with self.mailbox.idle as idle:
+                responses = idle.poll(timeout=timeout)
+            self.idle_supported = True
+            return bool(responses)
+        except Exception as exc:  # noqa: BLE001
+            low = str(exc).lower()
+            if "not support" in low or "bad" in low or "idle" in low:
+                self.idle_supported = False
+                raise IdleNotSupported(str(exc)) from exc
+            raise
