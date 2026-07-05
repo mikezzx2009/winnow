@@ -41,6 +41,7 @@ def _require_core_config() -> None:
     require(settings.email_126, "EMAIL_126")
     require(settings.imap_auth_code, "IMAP_AUTH_CODE")
     require(settings.minimax_api_key, "MINIMAX_API_KEY")
+    require(settings.forward_to, "FORWARD_TO")
 
 
 def cmd_run(_args: argparse.Namespace) -> int:

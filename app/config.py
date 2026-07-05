@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     smtp_port: int = 465
 
     # ----- 转发 -----
-    forward_to: str = "you@example.com"
+    forward_to: Optional[str] = None   # FORWARD_TO: 转发目标邮箱（.env 或控制台配置）
     subject_prefix: str = "[Winnow] "
 
     # ----- MiniMax (可替换适配器: base_url/key/model 全部走配置) -----

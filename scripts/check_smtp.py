@@ -6,7 +6,7 @@
 运行：
     uv run python scripts/check_smtp.py
 
-预期 PASS：脚本打印发送成功，且你在目标邮箱 (you@example.com) 收到这封测试信。
+预期 PASS：脚本打印发送成功，且你在目标邮箱 (FORWARD_TO) 收到这封测试信。
 """
 
 import smtplib
@@ -24,7 +24,7 @@ from app.config import require, settings  # noqa: E402
 def main() -> int:
     email = require(settings.email_126, "EMAIL_126")
     auth_code = require(settings.imap_auth_code, "IMAP_AUTH_CODE")
-    target = settings.forward_to
+    target = require(settings.forward_to, "FORWARD_TO")
 
     msg = EmailMessage()
     msg["From"] = f"Winnow <{email}>"        # 发件人必须是登录账号本身，否则 126 拒发

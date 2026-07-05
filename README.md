@@ -1,18 +1,26 @@
 # Winnow —— 126 邮箱 AI 智能转发服务
 
-持续监控一个 126 邮箱的新邮件，用 AI（MiniMax）判断每封是否「重要」（非广告/垃圾/营销），
+*An AI-powered mail triage & forwarding service for NetEase 126 mailboxes, with a web console.*
+
+持续监控 126 邮箱的新邮件，用 AI（MiniMax）判断每封是否「重要」（非广告/垃圾/营销），
 把重要邮件以**原 126 身份**转发到指定目标邮箱。本质是一个「带 Web 控制台的后台邮件处理服务」。
 
-> 当前进度：**Phase 1 · 步骤 A（命脉验证）**。先把三条命脉（IMAP 收信 / SMTP 发信 / MiniMax 调用）
-> 各自跑通，再拼装完整管线。
+**功能一览**
+- 两级过滤：规则预筛（退订头/群发头/营销词，不调模型）+ MiniMax 结构化判断，省额度、避限流
+- 以原 126 身份 SMTP 转发：保留原始正文/附件，`Reply-To` 回到真人，SPF/DKIM 天然对齐
+- 幂等去重（`Message-ID`）、发信限速、每日上限、断线指数退避重连、126 无 IDLE 时自动轮询
+- Web 控制台：登录、邮箱绑定（授权码 Fernet 加密入库）、白/黑名单、阈值等规则配置、
+  处理日志（AI 理由 + 人工复核纠错）、统计面板、系统状态/告警
+- 多账号（每账号独立 worker）/ 多控制台用户；AI 适配器可替换（换 Key/模型/厂商只改配置）
 
 ---
 
 ## 1. 环境要求
 
-- Python **3.11+**（开发机现为 3.13）
+- Python **3.11+**
 - [uv](https://docs.astral.sh/uv/) 包管理器
-- 部署目标：阿里云轻量应用服务器 · Ubuntu 22.04 LTS · systemd 常驻（部署细节在 Phase 1 收尾时补全）
+- 前端构建产物（`web/dist`）已随仓库提交，运行**无需 Node**；改前端才需要 Node 18+
+- 生产部署（Ubuntu + systemd + Nginx/HTTPS）见 [docs/DEPLOY.md](docs/DEPLOY.md)
 
 安装 uv（若未安装）：
 
@@ -218,3 +226,8 @@ journalctl -u winnow-web -f      # 控制台日志
   - 未绑定授权码的账号仅回退 .env 到与 EMAIL_126 同名的那个账号，其余必须在控制台绑定各自授权码。
 
 > 新增账号后需在「邮箱绑定」页填该账号授权码并启用；收信服务会在下一次对账（≤60s）或重启后接管。
+
+## 12. License
+
+[MIT](LICENSE)。注意：邮件正文会发送给你配置的 AI 服务商（默认 MiniMax）用于重要性判断，
+请自行评估隐私影响；本项目不长期存储完整正文（详见「工作原理」）。
