@@ -18,11 +18,16 @@ def _utcnow() -> datetime:
 
 
 class User(SQLModel, table=True):
-    """控制台登录用户（Phase 2 单用户）。密码用 bcrypt 哈希存储。"""
+    """控制台登录用户。密码用 bcrypt 哈希存储。
+
+    is_admin: 管理员可见全部账号并管理用户；普通用户只见自己名下账号。
+    第一个注册/创建的用户自动成为管理员。
+    """
 
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(index=True, unique=True)
     password_hash: str
+    is_admin: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -31,6 +36,8 @@ class Account(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(index=True, unique=True)
+    # 归属的控制台用户（多租户隔离）；旧数据迁移时归给第一位管理员
+    user_id: Optional[int] = Field(default=None, index=True, foreign_key="user.id")
     # INBOX 已处理到的最大 UID —— 重启后只拉取更大的 UID，避免重复处理旧邮件
     last_seen_uid: Optional[int] = Field(default=None)
 

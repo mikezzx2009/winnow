@@ -118,9 +118,13 @@ def cmd_set_password(args: argparse.Namespace) -> int:
     with session_scope() as s:
         user = s.exec(select(User).where(User.username == username)).first()
         if user is None:
-            s.add(User(username=username, password_hash=hash_password(password)))
+            # CLI 创建的用户视为运维方，直接给管理员
+            s.add(User(username=username, password_hash=hash_password(password), is_admin=True))
         else:
             user.password_hash = hash_password(password)
+    from app.db import claim_orphan_accounts
+
+    claim_orphan_accounts()
     print(f"✅ 已设置用户 {username} 的登录密码。")
     return 0
 

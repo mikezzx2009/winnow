@@ -26,8 +26,27 @@ if _is_sqlite:
 
 
 def init_db() -> None:
-    """建表（幂等）。"""
+    """建表 + 轻量迁移（均幂等）。"""
     SQLModel.metadata.create_all(engine)
+    if _is_sqlite:
+        _migrate_sqlite()
+
+
+def _migrate_sqlite() -> None:
+    """SQLite 轻量迁移：create_all 不会给已有表加列，这里手动补。"""
+    with engine.connect() as conn:
+        def columns(table: str) -> list:
+            return [row[1] for row in conn.exec_driver_sql(f'PRAGMA table_info("{table}")')]
+
+        if "is_admin" not in columns("user"):
+            conn.exec_driver_sql('ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN DEFAULT 0')
+            # 既有用户（注册功能上线前创建的）一律视为管理员
+            conn.exec_driver_sql('UPDATE "user" SET is_admin = 1')
+        if "user_id" not in columns("account"):
+            conn.exec_driver_sql("ALTER TABLE account ADD COLUMN user_id INTEGER")
+            # 既有账号归给第一位用户（即管理员）
+            conn.exec_driver_sql('UPDATE account SET user_id = (SELECT MIN(id) FROM "user")')
+        conn.commit()
 
 
 @contextmanager
@@ -73,4 +92,22 @@ def get_or_create_primary_account(default_email: str) -> Account:
     if account is not None:
         return account
     # EMAIL_126 未配置时用占位地址，避免控制台首屏 500；用户可在绑定页改为真实地址
-    return ensure_account(default_email or "unconfigured@126.com")
+    account = ensure_account(default_email or "unconfigured@126.com")
+    claim_orphan_accounts()
+    return account
+
+
+def claim_orphan_accounts() -> None:
+    """把无归属（user_id 为空）的账号归给第一位管理员（若存在）。幂等。"""
+    from app.models import User
+
+    with session_scope() as session:
+        admin = session.exec(
+            select(User).where(User.is_admin == True).order_by(User.id)  # noqa: E712
+        ).first()
+        if admin is None:
+            return
+        orphans = session.exec(select(Account).where(Account.user_id == None)).all()  # noqa: E711
+        for acc in orphans:
+            acc.user_id = admin.id
+            session.add(acc)

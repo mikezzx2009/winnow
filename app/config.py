@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     fernet_key: Optional[str] = None
     # Web 控制台 session Cookie 签名密钥（需稳定，否则重启后登录失效）
     session_secret: Optional[str] = None
+    # 是否允许新用户自助注册
+    allow_registration: bool = True
+    # 邀请码：设置后注册必须提供匹配的邀请码（公开实例防滥用）；留空则开放注册
+    registration_invite_code: Optional[str] = None
 
 
 settings = Settings()

@@ -46,7 +46,7 @@ export default function App() {
   }
 
   return (
-    <AccountContext.Provider value={{ accountId, accounts, setAccountId, reloadAccounts }}>
+    <AccountContext.Provider value={{ accountId, accounts, setAccountId, reloadAccounts, user: auth }}>
       <Layout user={auth} onLogout={() => setAuth(false)}>
         <Routes>
           <Route path="/" element={<Dashboard />} />

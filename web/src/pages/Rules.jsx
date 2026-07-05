@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useAccount } from '../accountContext'
+import EmptyAccount from '../components/EmptyAccount.jsx'
 
 const input = 'px-3 py-2 border border-slate-300 rounded-md'
 
@@ -15,9 +16,12 @@ export default function Rules() {
     setRules(await api.rules(accountId))
   }
   useEffect(() => {
+    if (!accountId) return
     load().catch((e) => setErr(e.message))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId])
+
+  if (!accountId) return <EmptyAccount />
 
   async function add(e) {
     e.preventDefault()

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useAccount } from '../accountContext'
+import EmptyAccount from '../components/EmptyAccount.jsx'
 
 function extractEmail(from) {
   const m = /<([^>]+)>/.exec(from || '')
@@ -27,9 +28,12 @@ export default function Logs() {
   }
 
   useEffect(() => {
+    if (!accountId) return
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, accountId])
+
+  if (!accountId) return <EmptyAccount />
 
   async function review(id, label) {
     await api.reviewLog(id, label)

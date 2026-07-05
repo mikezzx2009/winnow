@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useAccount } from '../accountContext'
+import EmptyAccount from '../components/EmptyAccount.jsx'
 
 function fmtAgo(seconds) {
   if (seconds == null) return '从未'
@@ -24,6 +25,7 @@ export default function Status() {
     }
   }
   useEffect(() => {
+    if (!accountId) return
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId])
@@ -33,6 +35,7 @@ export default function Status() {
     await load()
   }
 
+  if (!accountId) return <EmptyAccount />
   if (err) return <div className="text-red-600">{err}</div>
   if (!st) return <div className="text-slate-500">加载中…</div>
 

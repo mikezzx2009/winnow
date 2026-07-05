@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useAccount } from '../accountContext'
+import EmptyAccount from '../components/EmptyAccount.jsx'
 
 function Card({ label, value }) {
   return (
@@ -17,10 +18,12 @@ export default function Dashboard() {
   const [st, setSt] = useState(null)
   const [err, setErr] = useState('')
   useEffect(() => {
+    if (!accountId) return
     api.stats(accountId).then(setS).catch((e) => setErr(e.message))
     api.status(accountId).then(setSt).catch(() => {})
   }, [accountId])
 
+  if (!accountId) return <EmptyAccount />
   if (err) return <div className="text-red-600">{err}</div>
   if (!s) return <div className="text-slate-500">加载中…</div>
 

@@ -25,9 +25,14 @@ async function req(method, path, body) {
 }
 
 export const api = {
-  // 认证
+  // 认证 / 注册
   me: () => req('GET', '/auth/me'),
+  authConfig: () => req('GET', '/auth/config'),
   login: (username, password) => req('POST', '/auth/login', { username, password }),
+  register: (username, password, invite_code) =>
+    req('POST', '/auth/register', { username, password, invite_code }),
+  changeOwnPassword: (old_password, new_password) =>
+    req('POST', '/auth/password', { old_password, new_password }),
   logout: () => req('POST', '/auth/logout'),
 
   // 账号（多账号）

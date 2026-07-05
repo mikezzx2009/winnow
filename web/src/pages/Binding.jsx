@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useAccount } from '../accountContext'
+import EmptyAccount from '../components/EmptyAccount.jsx'
 
 const input = 'w-full px-3 py-2 border border-slate-300 rounded-md'
 
@@ -28,6 +29,7 @@ export default function Binding() {
   }
 
   useEffect(() => {
+    if (!accountId) return
     load().catch((e) => setErr(e.message))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId])
@@ -67,6 +69,7 @@ export default function Binding() {
     }
   }
 
+  if (!accountId) return <EmptyAccount />
   if (!acc) return <div className="text-slate-500">加载中…</div>
 
   return (
