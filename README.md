@@ -2,6 +2,8 @@
 
 *An AI-powered mail triage & forwarding service for NetEase 126 mailboxes, with a web console.*
 
+🌐 作者的线上实例：<https://winnow.zares.me>（私人部署，需登录，仅供参观登录页 🙂）
+
 持续监控 126 邮箱的新邮件，用 AI（MiniMax）判断每封是否「重要」（非广告/垃圾/营销），
 把重要邮件以**原 126 身份**转发到指定目标邮箱。本质是一个「带 Web 控制台的后台邮件处理服务」。
 
